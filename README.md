@@ -6,6 +6,6 @@ This is a playground of testing different LLMs and my daily LLM use cases. It is
 Tasks
 -------
 - [x] add self-extend function in chat mode.  
-- [ ] implement and test page attention / parallel kv cache.
+- [x] implement and test page attention / parallel kv cache.
 - [ ] test batch inference.
 

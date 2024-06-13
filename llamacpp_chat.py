@@ -23,6 +23,8 @@ import util
 # A LLaMA interactive session
 class LLaMAInteract:
 	def __init__(self, params: GptParams) -> None:
+		self.round=0
+		self.n_past_list=[]
 		# input args
 		self.params = params
 		if self.params.path_session is None:
@@ -71,6 +73,8 @@ specified) expect poor results""", file=sys.stderr)
 		self.lparams.use_mlock = self.params.use_mlock
 		self.lparams.use_mmap = self.params.use_mmap
 		self.lparams.n_gpu_layers = self.params.n_gpu_layers
+		self.lparams.n_batch = self.params.n_batch
+		self.lparams.n_ubatch = self.params.n_ubatch
 
 		self.model = llama_cpp.llama_load_model_from_file(
 			self.params.model.encode("utf8"), self.lparams)
@@ -78,6 +82,8 @@ specified) expect poor results""", file=sys.stderr)
 		# Context Params.
 		self.cparams = llama_cpp.llama_context_default_params()
 		self.cparams.n_ctx=self.lparams.n_ctx
+		self.cparams.n_batch=self.lparams.n_batch
+		self.cparams.n_ubatch=self.lparams.n_ubatch
 		self.ctx = llama_cpp.llama_new_context_with_model(self.model, self.cparams)
 		if (not self.ctx):
 			raise RuntimeError(f"error: failed to load model '{self.params.model}'")
@@ -261,7 +267,13 @@ n_keep = {self.params.n_keep}
 		return len(self.first_antiprompt) > 0
 
 	# generate tokens
-	def generate(self):
+	def generate(self, seq_id):
+		# seq_id = self.round % 2
+		if self.n_past:
+			self.n_past_list.append(self.n_past)
+			llama_cpp.llama_kv_cache_seq_cp(self.ctx, 0, seq_id,-1,self.n_past_list[0])
+		print(f"round {self.round}, seq_id: {seq_id}, n_past: {self.n_past}", file=sys.stderr)
+
 		while self.remaining_tokens > 0 or self.params.interactive or self.params.n_predict == -1:
 			# predict
 			if len(self.embd) > 0:
@@ -283,8 +295,8 @@ n_keep = {self.params.n_keep}
 					]
 					#self.embd = _insert + self.embd
 					self.params.path_session = ""
-					llama_cpp.llama_kv_cache_seq_rm(self.ctx,-1, self.n_past, int(n_left/2)+self.n_past)
-					llama_cpp.llama_kv_cache_seq_add(self.ctx,-1, int(n_left/2)+self.n_past, self.n_ctx, -int(n_left/2))
+					llama_cpp.llama_kv_cache_seq_rm(self.ctx, -1, self.n_past, int(n_left/2)+self.n_past)
+					llama_cpp.llama_kv_cache_seq_add(self.ctx, -1, int(n_left/2)+self.n_past, self.n_ctx, -int(n_left/2))
 					self.n_past = int(n_left/2)+self.n_past
 					print(f"reset n_past to {self.n_past}.", file=sys.stderr)
 
@@ -327,7 +339,7 @@ n_keep = {self.params.n_keep}
 					if (n_eval+i>=len(self.embd)):
 						n_eval = len(self.embd)-i						
 					_arr = (llama_cpp.llama_token * n_eval)(*self.embd[i:i + n_eval])
-					if (llama_cpp.llama_decode(self.ctx, llama_cpp.llama_batch_get_one(_arr, n_eval, i+self.n_past,-1))): 
+					if (llama_cpp.llama_decode(self.ctx, llama_cpp.llama_batch_get_one(_arr, n_eval, i+self.n_past,seq_id))): 
 						print(f"failed to eval")
 						return
 					#self.n_past += n_eval
@@ -338,7 +350,7 @@ n_keep = {self.params.n_keep}
 
 			self.n_past += len(self.embd)
 			#print(f"n_past: {self.n_past}.", file=sys.stderr)
-			llama_cpp.llama_kv_cache_seq_rm(self.ctx,-1, self.n_past, -1)
+			llama_cpp.llama_kv_cache_seq_rm(self.ctx, seq_id, self.n_past, -1)
 			
 			self.embd = []
 			if len(self.embd_inp) <= self.input_consumed: #&& !is_interacting
@@ -529,7 +541,7 @@ n_keep = {self.params.n_keep}
 	# write output
 	def output(self):
 		self.remaining_tokens = self.params.n_predict
-		for id in self.generate():
+		for id in self.generate(0):
 			cur_char = self.token_to_str(id)
 
 			# Add remainder of missing bytes
@@ -556,6 +568,7 @@ n_keep = {self.params.n_keep}
 
 	# read user input
 	def read_input(self):
+		self.round+=1
 		out = ""
 		while (t := input()).endswith("\\"):
 			out += t[:-1] + "\n"
@@ -593,6 +606,7 @@ n_keep = {self.params.n_keep}
 				if not self.params.instruct:
 					print(self.params.fix_prefix,end="")
 					self.input(self.params.fix_prefix)
+			
 
 if __name__ == "__main__":
 	from datetime import datetime
