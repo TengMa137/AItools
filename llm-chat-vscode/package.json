@@ -1,0 +1,74 @@
+{
+  "name": "llm-chat",
+  "displayName": "LLM Chat",
+  "description": "Chat with LLM models like Claude directly from VS Code",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "LLM Chat",
+      "properties": {
+        "llmChat.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the LLM service"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "llm-chat.newChat",
+        "title": "LLM Chat: New Chat"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "llm-chat",
+          "title": "LLM Chat",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "llm-chat": [
+        {
+          "type": "webview",
+          "id": "llm-chat-sidebar",
+          "name": "Chat"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "webpack",
+    "build": "tsc",
+    "watch": "webpack --watch",
+    "package": "webpack --mode production --devtool hidden-source-map",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^16.11.7",
+    "@types/node-fetch": "^2.7.0",
+    "@types/vscode": "^1.98.0",
+    "@typescript-eslint/eslint-plugin": "^5.30.0",
+    "@typescript-eslint/parser": "^5.30.0",
+    "eslint": "^8.18.0",
+    "ts-loader": "^9.3.1",
+    "typescript": "^4.9.5",
+    "vscode": "^1.1.34",
+    "webpack": "^5.74.0",
+    "webpack-cli": "^4.10.0"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.7"
+  }
+}
