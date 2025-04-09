@@ -58,9 +58,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
 
+    const editor = vscode.window.activeTextEditor;
+
+    if (!editor) {
+        vscode.window.showErrorMessage("No active editor detected.");
+        return;
+    }
+
+    const selection = editor.selection;
+    const selectedText = editor.document.getText(selection);
     // Add user message to history
     const currentChat = this._chatHistory.chats[this._currentChatIndex];
-    currentChat.push({ role: 'user', content: message });
+    currentChat.push({ role: 'user', content: message + "\n\nSelected text:\n" + selectedText});
     
     // Update the UI with the new message
     this._view.webview.postMessage({ 

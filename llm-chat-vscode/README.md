@@ -3,4 +3,5 @@ Chat in vscode
 
 Integrate local LLMs to vscode plugin.
 Demo:
-![](./output.gif)
+<br>
+[](./vs_llm.mp4)
