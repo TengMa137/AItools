@@ -14,7 +14,7 @@ export class LlmService {
   
   public async getStreamingResponse(
     messages: Message[], 
-    onChunk: (text: string) => void
+    onChunk: (text: string) => void,
   ): Promise<void> {
     // Create a new abort controller for this request
     this._abortController = new AbortController();

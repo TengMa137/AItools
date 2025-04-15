@@ -23,6 +23,15 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deactivate = exports.activate = void 0;
 const vscode = __importStar(require("vscode"));
@@ -33,11 +42,22 @@ function activate(context) {
     const llmService = new LlmService_1.LlmService();
     // Register the sidebar webview provider
     const sidebarProvider = new SidebarProvider_1.SidebarProvider(context.extensionUri, llmService);
-    context.subscriptions.push(vscode.window.registerWebviewViewProvider("llm-chat-sidebar", sidebarProvider));
+    context.subscriptions.push(vscode.window.registerWebviewViewProvider("llm-chat-sidebar", sidebarProvider, {
+        webviewOptions: {
+            retainContextWhenHidden: true
+        }
+    }));
     // Register commands
     context.subscriptions.push(vscode.commands.registerCommand('llm-chat.newChat', () => {
         sidebarProvider.newChat();
     }));
+    // Command to open the view
+    context.subscriptions.push(vscode.commands.registerCommand('llm-chat.openView', () => __awaiter(this, void 0, void 0, function* () {
+        // Focus on the view container first
+        yield vscode.commands.executeCommand('workbench.view.extension.llm-chat');
+        // Then focus on the specific view
+        yield vscode.commands.executeCommand('llm-chat-sidebar.focus');
+    })));
     console.log('LLM Chat extension is now active!');
 }
 exports.activate = activate;

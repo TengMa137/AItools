@@ -1,0 +1,31 @@
+<!<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Chat</title>
+  <link rel="stylesheet" href="{{styleUri}}">
+</head>
+<body>
+  <div class="container">
+    <!-- Input area at the top -->
+    <div class="input-container">
+        <input type="text" id="messageInput" placeholder="Ask something..." />
+        <button id="sendButton" class="send-button">
+        <span class="icon">↵</span>
+        </button>
+    </div>
+    
+    <!-- Chat messages area -->
+    <div class="chat-container" id="chatContainer"></div>
+    
+    <!-- Navigation arrows at the bottom, properly aligned left and right -->
+    <div class="navigation">
+        <button id="prevButton" class="nav-button" style="display: none;">←</button>
+        <button id="nextButton" class="nav-button">→</button>
+    </div>
+  </div>
+
+  <script src="{{scriptUri}}"></script>
+</body>
+</html>

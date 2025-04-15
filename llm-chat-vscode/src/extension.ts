@@ -13,7 +13,12 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "llm-chat-sidebar",
-      sidebarProvider
+      sidebarProvider,
+      {
+        webviewOptions: {
+          retainContextWhenHidden: true
+        }
+      }
     )
   );
 
@@ -24,6 +29,15 @@ export function activate(context: vscode.ExtensionContext) {
     })
   );
 
+  // Command to open the view
+  context.subscriptions.push(
+    vscode.commands.registerCommand('llm-chat.openView', async () => {
+      // Focus on the view container first
+      await vscode.commands.executeCommand('workbench.view.extension.llm-chat');
+      // Then focus on the specific view
+      await vscode.commands.executeCommand('llm-chat-sidebar.focus');
+    })
+  );
   console.log('LLM Chat extension is now active!');
 }
 
