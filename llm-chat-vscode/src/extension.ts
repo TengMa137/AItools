@@ -21,14 +21,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     )
   );
-
-  // Register commands
-  context.subscriptions.push(
-    vscode.commands.registerCommand('llm-chat.newChat', () => {
-      sidebarProvider.newChat();
-    })
-  );
-
+  
   // Command to open the view
   context.subscriptions.push(
     vscode.commands.registerCommand('llm-chat.openView', async () => {

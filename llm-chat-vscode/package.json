@@ -4,7 +4,7 @@
   "description": "Chat with LLM models like Claude directly from VS Code",
   "version": "0.1.0",
   "engines": {
-    "vscode": "^1.60.0"
+    "vscode": "^1.98.0"
   },
   "categories": [
     "Other"
@@ -25,10 +25,6 @@
       }
     },
     "commands": [
-      {
-        "command": "llm-chat.newChat",
-        "title": "LLM Chat: New Chat"
-      },
       {
         "command": "llm-chat.openView",
         "title": "LLM Chat: Open Chat View"
@@ -55,9 +51,7 @@
         {
           "type": "webview",
           "id": "llm-chat-sidebar",
-          "name": "Chat",
-          "visibility": "visible",
-          "icon": "resources/icon.svg"
+          "name": "LLM Chat"
         }
       ]
     }

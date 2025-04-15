@@ -48,9 +48,11 @@ function activate(context) {
         }
     }));
     // Register commands
-    context.subscriptions.push(vscode.commands.registerCommand('llm-chat.newChat', () => {
-        sidebarProvider.newChat();
-    }));
+    // context.subscriptions.push(
+    //   vscode.commands.registerCommand('llm-chat.newChat', () => {
+    //     sidebarProvider.newChat();
+    //   })
+    // );
     // Command to open the view
     context.subscriptions.push(vscode.commands.registerCommand('llm-chat.openView', () => __awaiter(this, void 0, void 0, function* () {
         // Focus on the view container first
