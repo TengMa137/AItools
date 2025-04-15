@@ -15,6 +15,7 @@ export class LlmService {
   public async getStreamingResponse(
     messages: Message[], 
     onChunk: (text: string) => void,
+    onComplete:(text: string) => void
   ): Promise<void> {
     // Create a new abort controller for this request
     this._abortController = new AbortController();
@@ -82,6 +83,8 @@ export class LlmService {
 
       reader.on('end', () => {
         console.log('Stream ended');
+        // Call the completion handler when stream is finished
+        if (onComplete) onComplete(fullText);
       });
 
       reader.on('error', (err: Error) => {

@@ -19,7 +19,7 @@ class LlmService {
     constructor() {
         this._abortController = null;
     }
-    getStreamingResponse(messages, onChunk) {
+    getStreamingResponse(messages, onChunk, onComplete) {
         return __awaiter(this, void 0, void 0, function* () {
             // Create a new abort controller for this request
             this._abortController = new AbortController();
@@ -80,6 +80,9 @@ class LlmService {
                 });
                 reader.on('end', () => {
                     console.log('Stream ended');
+                    // Call the completion handler when stream is finished
+                    if (onComplete)
+                        onComplete(fullText);
                 });
                 reader.on('error', (err) => {
                     console.error('Error while reading the stream:', err);

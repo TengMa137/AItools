@@ -93,7 +93,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         (partialResponse) => {
           // Update the assistant's message content as chunks arrive
           currentChat[currentChat.length - 1].content = partialResponse;
-          console.log(`Re: ${currentChat[currentChat.length - 1].content}`);  // Debug log
+          // console.log(`Re: ${currentChat[currentChat.length - 1].content}`);  // Debug log
           // Update the UI with the streaming response
           this._view?.webview.postMessage({
             type: 'updateChat',
@@ -103,6 +103,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             context: {
               userData: context,
               extensionUri: this._extensionUri,}
+          });
+        },
+        async () => {
+          // Save the chat after the streaming is fully complete
+          await this.saveChatToMarkdown();
+          
+          // Optional: Update UI to show generation is complete
+          this._view?.webview.postMessage({
+            type: 'updateChat',
+            history: this._chatHistory,
+            currentChatIndex: this._currentChatIndex,
+            isGenerating: false,
+            context: {
+              userData: context,
+              extensionUri: this._extensionUri,
+            }
           });
         }
       );      
@@ -119,6 +135,70 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         currentChatIndex: this._currentChatIndex,
         isGenerating: false
       });
+    }
+  }
+  /**
+   * Saves the current chat to a markdown file or appends to existing file
+   */
+  private async saveChatToMarkdown() {
+    try {
+      const chat = this._chatHistory.chats[this._currentChatIndex];
+      // Use current chat index and first question for filename, saved in md-notes/${date}/      
+      const now = new Date();
+      const date = now.toISOString().slice(0, 10); // "2025-04-14"
+      const fileName = `chat-${this._currentChatIndex}-${chat[0].content}.md`;
+      const mdFolder = path.join(`md-notes`, date);
+      
+      // Get workspace folders
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders) {
+        vscode.window.showErrorMessage("No workspace folder open to save chat history.");
+        return;
+      }
+      
+      // Create a URI for the file in the workspace root
+      const fileUri = vscode.Uri.file(path.join(workspaceFolders[0].uri.fsPath, mdFolder, fileName));
+      
+      // Check if file exists
+      let existingContent = '';
+      try {
+        const fileData = await vscode.workspace.fs.readFile(fileUri);
+        existingContent = Buffer.from(fileData).toString('utf8');
+      } catch (err) {
+        // File doesn't exist yet, will create new
+        existingContent = '# Chat History for Session ' + this._currentChatIndex + '\n\n';
+      }
+      
+      // Format the most recent message exchange (last user and assistant messages)
+      let newContent = '';
+      if (chat.length >= 2) {
+        const lastUserMsgIndex = chat.length - 2; // Assuming the pattern is always user then assistant
+        const lastAssistantMsgIndex = chat.length - 1;
+        
+        // Add user message
+        if (chat[lastUserMsgIndex].role === 'user') {
+          newContent += `### User\n\n${chat[lastUserMsgIndex].content}\n\n`;
+        }
+        
+        // Add assistant message
+        if (chat[lastAssistantMsgIndex].role === 'assistant') {
+          newContent += `### Assistant\n\n${chat[lastAssistantMsgIndex].content}\n\n`;
+        }
+      }
+      
+      // Combine existing content with new content
+      const updatedContent = existingContent + newContent;
+      
+      // Write to file
+      await vscode.workspace.fs.writeFile(
+        fileUri,
+        Buffer.from(updatedContent, 'utf8')
+      );
+      
+      vscode.window.showInformationMessage(`Chat appended to ${fileUri.fsPath}`);
+    } catch (error) {
+      console.error('Error saving chat to markdown:', error);
+      vscode.window.showErrorMessage('Failed to save chat to markdown file.');
     }
   }
 

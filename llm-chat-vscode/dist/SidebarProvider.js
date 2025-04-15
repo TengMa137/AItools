@@ -105,7 +105,7 @@ class SidebarProvider {
                     var _a;
                     // Update the assistant's message content as chunks arrive
                     currentChat[currentChat.length - 1].content = partialResponse;
-                    console.log(`Re: ${currentChat[currentChat.length - 1].content}`); // Debug log
+                    // console.log(`Re: ${currentChat[currentChat.length - 1].content}`);  // Debug log
                     // Update the UI with the streaming response
                     (_a = this._view) === null || _a === void 0 ? void 0 : _a.webview.postMessage({
                         type: 'updateChat',
@@ -117,23 +117,22 @@ class SidebarProvider {
                             extensionUri: this._extensionUri,
                         }
                     });
-                }
-                // async () => {
-                //   // Save the chat after the streaming is fully complete
-                //   await this.saveChatToMarkdown();
-                //   // Optional: Update UI to show generation is complete
-                //   this._view?.webview.postMessage({
-                //     type: 'updateChat',
-                //     history: this._chatHistory,
-                //     currentChatIndex: this._currentChatIndex,
-                //     isGenerating: false,
-                //     context: {
-                //       userData: context,
-                //       extensionUri: this._extensionUri,
-                //     }
-                //   });
-                // }
-                );
+                }, () => __awaiter(this, void 0, void 0, function* () {
+                    var _b;
+                    // Save the chat after the streaming is fully complete
+                    yield this.saveChatToMarkdown();
+                    // Optional: Update UI to show generation is complete
+                    (_b = this._view) === null || _b === void 0 ? void 0 : _b.webview.postMessage({
+                        type: 'updateChat',
+                        history: this._chatHistory,
+                        currentChatIndex: this._currentChatIndex,
+                        isGenerating: false,
+                        context: {
+                            userData: context,
+                            extensionUri: this._extensionUri,
+                        }
+                    });
+                }));
             }
             catch (error) {
                 console.error('Error getting response from LLM:', error);
@@ -159,9 +158,11 @@ class SidebarProvider {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 const chat = this._chatHistory.chats[this._currentChatIndex];
-                // Use current chat index for filename
-                const fileName = `chat-${this._currentChatIndex}.md`;
-                const mdFolder = `md-notes`;
+                // Use current chat index and first question for filename, saved in md-notes/${date}/      
+                const now = new Date();
+                const date = now.toISOString().slice(0, 10); // "2025-04-14"
+                const fileName = `chat-${this._currentChatIndex}-${chat[0].content}.md`;
+                const mdFolder = path.join(`md-notes`, date);
                 // Get workspace folders
                 const workspaceFolders = vscode.workspace.workspaceFolders;
                 if (!workspaceFolders) {
@@ -185,8 +186,6 @@ class SidebarProvider {
                 if (chat.length >= 2) {
                     const lastUserMsgIndex = chat.length - 2; // Assuming the pattern is always user then assistant
                     const lastAssistantMsgIndex = chat.length - 1;
-                    const timestamp = new Date().toLocaleString();
-                    newContent += `\n## Chat Exchange - ${timestamp}\n\n`;
                     // Add user message
                     if (chat[lastUserMsgIndex].role === 'user') {
                         newContent += `### User\n\n${chat[lastUserMsgIndex].content}\n\n`;
@@ -195,7 +194,6 @@ class SidebarProvider {
                     if (chat[lastAssistantMsgIndex].role === 'assistant') {
                         newContent += `### Assistant\n\n${chat[lastAssistantMsgIndex].content}\n\n`;
                     }
-                    newContent += `---\n`;
                 }
                 // Combine existing content with new content
                 const updatedContent = existingContent + newContent;
