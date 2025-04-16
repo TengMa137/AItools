@@ -21,7 +21,7 @@
         
         currentChat.forEach(message => {
         const messageElement = document.createElement('div');
-        messageElement.className = `message \${message.role}`;
+        messageElement.className = `message ${message.role}`;
         
         const contentElement = document.createElement('div');
         contentElement.className = 'content';

@@ -254,11 +254,25 @@ class SidebarProvider {
         const scriptUri = webview.asWebviewUri(vscode.Uri.file(jsPath));
         // Get the path to the stylesheet and convert to webview URI
         const styleUri = webview.asWebviewUri(vscode.Uri.file(cssPath));
+        // Set Content Security Policy source
+        const nonce = this._getNonce();
+        const cspSource = webview.cspSource;
         // Replace placeholders in the HTML with actual URIs
         htmlContent = htmlContent
-            .replace('{{scriptUri}}', scriptUri.toString())
-            .replace('{{styleUri}}', styleUri.toString());
+            .replace(/{{scriptUri}}/g, scriptUri.toString())
+            .replace(/{{styleUri}}/g, styleUri.toString())
+            .replace(/{{nonce}}/g, nonce)
+            .replace(/{{cspSource}}/g, cspSource);
+        console.log(htmlContent);
         return htmlContent;
+    }
+    _getNonce() {
+        let text = '';
+        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        for (let i = 0; i < 32; i++) {
+            text += possible.charAt(Math.floor(Math.random() * possible.length));
+        }
+        return text;
     }
 }
 exports.SidebarProvider = SidebarProvider;
