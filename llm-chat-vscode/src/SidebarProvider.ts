@@ -104,9 +104,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
               extensionUri: this._extensionUri,}
           });
         },
-        async () => {
+        async (isComplete) => {
           // Save the chat after the streaming is fully complete
-          await this.saveChatToMarkdown();
+          if (isComplete) await this.saveChatToMarkdown();
           
           // Optional: Update UI to show generation is complete
           this._view?.webview.postMessage({
@@ -140,8 +140,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
    * Saves the current chat to a markdown file or appends to existing file
    */
   private async saveChatToMarkdown() {
+    const chat = this._chatHistory.chats[this._currentChatIndex];
+    if (chat[chat.length - 1].content === 'Aborted') {
+      return;
+    }
     try {
-      const chat = this._chatHistory.chats[this._currentChatIndex];
       // Use current chat index and first question for filename, saved in md-notes/${date}/      
       const now = new Date();
       const date = now.toISOString().slice(0, 10); // "2025-04-14"

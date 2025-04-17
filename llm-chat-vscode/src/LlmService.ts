@@ -1,6 +1,5 @@
-import * as vscode from 'vscode';
 import fetch from 'node-fetch';
-import { TextDecoder } from 'util';  // Node.js TextDecoder
+import { TextDecoder } from 'util';
 
 interface Message {
   role: string;
@@ -9,103 +8,135 @@ interface Message {
 
 export class LlmService {
   private _abortController: AbortController | null = null;
-  
+  private _activeRequest: Promise<void> | null = null;
+
   constructor() {}
-  
+
   public async getStreamingResponse(
-    messages: Message[], 
+    messages: Message[],
     onChunk: (text: string) => void,
-    onComplete:(text: string) => void
+    onComplete: (flag: boolean) => void
   ): Promise<void> {
+    console.log('Starting getStreamingResponse');
+    
+    onComplete(false);
+    // If there's already a running request, cancel it first
+    if (this._abortController) {
+      console.log('Cancelling existing request');
+      this.cancelRequest();
+    }
+
     // Create a new abort controller for this request
     this._abortController = new AbortController();
-    // this._abortController.signal.onabort = (event: any) => {
-    //   // Handle abort event here
-    //   console.log("Request aborted", event);
-    //   // Optionally, you could notify the user that the request was canceled.
-    // };
-    
-    try {
-      // Get API key from configuration
-      // const config = vscode.workspace.getConfiguration('llmChat');
-      // const apiKey = config.get<string>('apiKey');
-      
-      // if (!apiKey) {
-      //   throw new Error('API key not configured. Please set llmChat.apiKey in your settings.');
-      // }
-      
-      // Build the request to OpenAI API
-      const response = await fetch('http://localhost:8080/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer no key`, //${apiKey}
-        },
-        body: JSON.stringify({
-          model: 'gpt-4',  // You can change this to 'gpt-3.5-turbo' or 'gpt-4' depending on your use case
-          messages: messages,
-          stream: true
-        }),
-        signal: this._abortController.signal
-      });
-      
-      if (!response.ok || !response.body) {
-        throw new Error(`API request failed: ${response.statusText}`);
-      }
-      
-      // Process the stream using Node.js streams
-      const reader = response.body;
-      const decoder = new TextDecoder();
-      let fullText = '';
+    const controller = this._abortController;
+    let fullText = '';
 
-      // Handling stream data with Node.js events
-      reader.on('data', (chunk: Buffer) => {
-        const decodedText = decoder.decode(chunk, { stream: true });
-        const lines = decodedText.split('\n').filter(line => line.trim() !== '');
+    // Create a promise that we can wait for
+    this._activeRequest = new Promise<void>(async (resolve, reject) => {
+      try {
+        console.log('Starting fetch request');
+        
+        const response = await fetch('http://localhost:8080/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer no key`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4',
+            messages: messages,
+            stream: true
+          }),
+          signal: controller.signal
+        });
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-            
-            try {
-              const parsedData = JSON.parse(data);
-              if (parsedData.choices && parsedData.choices[0].delta && parsedData.choices[0].delta.content) {
-                fullText += parsedData.choices[0].delta.content;
-                onChunk(fullText);
+        console.log('Fetch request completed, status:', response.status);
+
+        if (!response.ok || !response.body) {
+          throw new Error(`API request failed: ${response.statusText}`);
+        }
+
+        const reader = response.body;
+        const decoder = new TextDecoder();
+
+        reader.on('data', (chunk: Buffer) => {
+          if (controller.signal.aborted) {
+            console.log('Request was aborted during data processing');
+            return;
+          }
+
+          const decodedText = decoder.decode(chunk, { stream: true });
+          const lines = decodedText.split('\n').filter(line => line.trim() !== '');
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsedData = JSON.parse(data);
+                if (parsedData.choices && parsedData.choices[0].delta && parsedData.choices[0].delta.content) {
+                  fullText += parsedData.choices[0].delta.content;
+                  onChunk(fullText);
+                }
+              } catch (e) {
+                console.error('Error parsing streaming data:', e);
               }
-            } catch (e) {
-              console.error('Error parsing streaming data:', e);
             }
           }
+        });
+
+        reader.on('end', () => {
+          console.log('Stream ended normally');
+          onComplete(true);
+          resolve();
+        });
+
+        reader.on('error', (err: Error) => {
+          console.error('Error while reading the stream:', err);
+          if (err.name === 'AbortError') {
+            console.log('Stream aborted');
+            onChunk('Aborted');
+            onComplete(true);
+            resolve();
+          } else {
+            reject(err);
+          }
+        });
+
+      } catch (error: any) {
+        console.log('Caught error in fetch:', error.name, error.message);
+        
+        if (error.name === 'AbortError') {
+          console.log('Request was aborted successfully');
+          onComplete(true);
+          resolve();
+        } else {
+          reject(error);
         }
-      });
-
-      reader.on('end', () => {
-        console.log('Stream ended');
-        // Call the completion handler when stream is finished
-        if (onComplete) onComplete(fullText);
-      });
-
-      reader.on('error', (err: Error) => {
-        console.error('Error while reading the stream:', err);
-      });
-
-    } catch (error:any) {
-      if (error.name === 'AbortError') {
-        console.log('Request was aborted');
-      } else {
-        throw error;
       }
+    });
+
+    try {
+      // Wait for the request to complete
+      await this._activeRequest;
     } finally {
-      this._abortController = null;
+      // Only clear the controller if it's still the same one
+      if (this._abortController === controller) {
+        console.log('Clearing abort controller in finally block');
+        this._abortController = null;
+      }
+      this._activeRequest = null;
     }
   }
-  
+
   public cancelRequest() {
+    console.log('cancelRequest called, controller exists:', !!this._abortController);
+    
     if (this._abortController) {
       this._abortController.abort();
-      this._abortController = null;
+      console.log('Called abort() on controller');
     }
   }
 }

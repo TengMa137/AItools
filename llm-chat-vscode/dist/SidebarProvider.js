@@ -117,10 +117,11 @@ class SidebarProvider {
                             extensionUri: this._extensionUri,
                         }
                     });
-                }, () => __awaiter(this, void 0, void 0, function* () {
+                }, (isComplete) => __awaiter(this, void 0, void 0, function* () {
                     var _b;
                     // Save the chat after the streaming is fully complete
-                    yield this.saveChatToMarkdown();
+                    if (isComplete)
+                        yield this.saveChatToMarkdown();
                     // Optional: Update UI to show generation is complete
                     (_b = this._view) === null || _b === void 0 ? void 0 : _b.webview.postMessage({
                         type: 'updateChat',
@@ -156,8 +157,11 @@ class SidebarProvider {
      */
     saveChatToMarkdown() {
         return __awaiter(this, void 0, void 0, function* () {
+            const chat = this._chatHistory.chats[this._currentChatIndex];
+            if (chat[chat.length - 1].content === 'Aborted') {
+                return;
+            }
             try {
-                const chat = this._chatHistory.chats[this._currentChatIndex];
                 // Use current chat index and first question for filename, saved in md-notes/${date}/      
                 const now = new Date();
                 const date = now.toISOString().slice(0, 10); // "2025-04-14"
