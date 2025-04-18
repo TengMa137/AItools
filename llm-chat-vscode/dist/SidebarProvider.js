@@ -85,7 +85,7 @@ class SidebarProvider {
             }
             const selection = editor.selection;
             const selectedText = editor.document.getText(selection);
-            // Add user message to history
+            // Add system and user message to history
             const currentChat = this._chatHistory.chats[this._currentChatIndex];
             currentChat.push({ role: 'user', content: selectedText ? message + "\n\nSelected text:\n" + selectedText : message });
             // Update the UI with the new message
@@ -162,11 +162,12 @@ class SidebarProvider {
                 return;
             }
             try {
-                // Use current chat index and first question for filename, saved in md-notes/${date}/      
+                // Use current chat index and first question for filename, saved in md-notes/${date}/ 
+                const res = chat[1].content.split(/[.\n]+/);
                 const now = new Date();
-                const date = now.toISOString().slice(0, 10); // "2025-04-14"
-                const fileName = `chat-${this._currentChatIndex}-${chat[0].content}.md`;
-                const mdFolder = path.join(`md-notes`, date);
+                const dateLocal = now.toLocaleString().replace(/\//g, '-').split(/[,]+/); // Destructure the object 
+                const fileName = `${this._currentChatIndex}--${res[0]}.md`;
+                const mdFolder = path.join(`md-notes`, dateLocal[0]);
                 // Get workspace folders
                 const workspaceFolders = vscode.workspace.workspaceFolders;
                 if (!workspaceFolders) {
