@@ -1,15 +1,17 @@
 // extension.ts - Main entry point for the extension
 
 import * as vscode from 'vscode';
-import { SidebarProvider } from './SidebarProvider';
-import { LlmService } from './LlmService';
+import { SidebarProvider } from './sidebarProvider';
+import { LLMService } from './llmService';
+import { RagService } from './rag';
 
 export function activate(context: vscode.ExtensionContext) {
   // Initialize the LLM service
-  const llmService = new LlmService();
+  const llmService = new LLMService();
+  const ragService = new RagService('no key');
   
   // Register the sidebar webview provider
-  const sidebarProvider = new SidebarProvider(context.extensionUri, llmService);
+  const sidebarProvider = new SidebarProvider(context.extensionUri, llmService, ragService);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       "llm-chat-sidebar",

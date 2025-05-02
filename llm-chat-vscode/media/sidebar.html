@@ -16,6 +16,22 @@
         </button>
     </div>
     
+    <!-- rag toggle -->
+    <div class="settings-container">
+      <div class="toggle-container">
+        <label class="toggle-switch">
+          <input type="checkbox" id="ragToggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">Use RAG Context</span>
+        <span class="tooltip-icon" title="Enable Retrieval Augmented Generation to provide code context from your workspace">?</span>
+      </div>
+      <!-- Make sure this element exists -->
+      <div class="status-indicator">
+        <span id="ragStatus" class="status-badge">RAG: Off</span>
+      </div>
+    </div>
+    
     <!-- Chat messages area -->
     <div class="chat-container" id="chatContainer"></div>
     

@@ -1,23 +1,29 @@
 // SidebarProvider.ts - Manages the sidebar webview UI and functionality
 
 import * as vscode from 'vscode';
-import { LlmService } from './LlmService';
 import * as path from 'path';
 import * as fs from 'fs';
-import { timeStamp } from 'console';
+import { LLMService } from './llmService';
+import { RagService } from './rag';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
-  private _llmService: LlmService;
+  private _llmService: LLMService;
+  private _ragService: RagService;
   private _chatHistory: { chats: Array<Array<{role: string, content: string}>> };
   private _currentChatIndex: number = 0;
   private _isGenerating: boolean = false;
+  private _ragEnabled: boolean = false;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
-    llmService: LlmService
+    _llmService: LLMService,
+    _ragService: RagService,
+    _ragEnabled: boolean = false
   ) {
-    this._llmService = llmService;
+    this._llmService = _llmService;
+    this._ragService = _ragService;
+    this._ragEnabled = _ragEnabled;
     this._chatHistory = { chats: [[]] };
   }
 
@@ -40,6 +46,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         case 'sendMessage':
           await this.handleUserMessage(data.value, context);
           break;
+        case 'updateRagState':
+          // Make sure to use the correct property (either enabled or value, depending on your earlier fix choice)
+          this._ragEnabled = data.enabled;
+          console.log('Received updateRagState:', this._ragEnabled);
+          
+          // Always send back an immediate confirmation
+          this._view?.webview.postMessage({ 
+            type: 'updateStatus', 
+            value: this._ragEnabled ? 'Enabled' : 'Off' 
+          });
+          
+          // If enabling RAG and we haven't indexed yet, start indexing
+          if (this._ragEnabled && !this._ragService.isIndexed()) {
+            try {
+              this._view?.webview.postMessage({ type: 'updateStatus', value: 'Indexing workspace...' });
+              await this._ragService.indexWorkspace(msg => {
+                this._view?.webview.postMessage({ type: 'updateStatus', value: msg });
+              });
+              this._view?.webview.postMessage({ type: 'updateStatus', value: 'Ready' });
+            } catch (error) {
+              console.error('RAG indexing error:', error);
+              this._view?.webview.postMessage({ type: 'updateStatus', value: 'Error' });
+            }
+          }
+          break;
         case 'stopGeneration':
           this.stopGeneration();
           break;
@@ -47,6 +78,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           this.navigateChat(data.direction);
           break;
       }
+    });
+    console.log('Received updateRagState:', this._ragEnabled);
+    // Send confirmation of the toggle state using the combined message type
+    this._view?.webview.postMessage({ 
+      type: 'updateRagState', 
+      status: this._ragEnabled ? 'Enabled' : 'Off' 
     });
   }
 
@@ -69,10 +106,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const selection = editor.selection;
     const selectedText = editor.document.getText(selection);
-    // Add system and user message to history
+    if (this._ragEnabled) {
+      let relevant_context = '';
+      relevant_context = await this._ragService.queryRelevantContent(message);
+      console.log(`Found: ${relevant_context}`);
+    }
+    // Add user message to history
     const currentChat = this._chatHistory.chats[this._currentChatIndex];
-    currentChat.push({ role: 'user', content: selectedText ? message + "\n\nSelected text:\n" + selectedText : message});
-    
+    // currentChat.push({ role: 'user', content: selectedText ? message + "\n\nSelected text:\n" + selectedText : message});
+    currentChat.push({ role: 'user', content: message + selectedText});
+
     // Update the UI with the new message
     this._view.webview.postMessage({ 
       type: 'updateChat', 

@@ -18,7 +18,7 @@ body {
 .input-container {
   display: flex;
   padding: 8px;
-  border-bottom: 1px solid var(--vscode-panel-border);
+  border-top: 1px solid var(--vscode-panel-border);
 }
 
 #messageInput {
@@ -29,6 +29,9 @@ body {
   color: var(--vscode-input-foreground);
   border-radius: 4px;
   outline: none;
+  min-height: 32px;
+  resize: vertical;
+  max-height: 120px;
 }
 
 .send-button {
@@ -105,4 +108,101 @@ body {
 
 .nav-button:hover {
   background-color: var(--vscode-button-secondaryHoverBackground);
+}
+
+/* RAG Toggle Styles */
+.settings-container {
+  padding: 8px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  background-color: var(--vscode-editorWidget-background);
+}
+
+.toggle-container {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 20px;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--vscode-input-background);
+  transition: .4s;
+  border-radius: 10px;
+  border: 1px solid var(--vscode-input-border);
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--vscode-descriptionForeground);
+  transition: .4s;
+  border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+  background-color: var(--vscode-button-background);
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateX(20px);
+  background-color: var(--vscode-button-foreground);
+}
+
+.toggle-label {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.tooltip-icon {
+  margin-left: 4px;
+  font-size: 10px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background-color: var(--vscode-descriptionForeground);
+  color: var(--vscode-editor-background);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: help;
+}
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background-color: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-input-border);
+}
+
+.status-badge.active {
+  background-color: var(--vscode-notificationLink-foreground);
+  color: var(--vscode-editor-background);
 }
