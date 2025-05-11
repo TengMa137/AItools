@@ -4,7 +4,9 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { LLMService } from './llmService';
-import { RagService } from './rag';
+import { RagService, SelectionMetadata } from './rag';
+import { ConverterFactory } from './converter/converterFactory';
+import { X2mdOptions } from './converter/x2md';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
@@ -14,6 +16,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private _currentChatIndex: number = 0;
   private _isGenerating: boolean = false;
   private _ragEnabled: boolean = false;
+  private _hasBackgroundIndexRun: boolean = false;
+  private readonly converterFactory: ConverterFactory;
 
   constructor(
     private readonly _extensionUri: vscode.Uri,
@@ -25,6 +29,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this._ragService = _ragService;
     this._ragEnabled = _ragEnabled;
     this._chatHistory = { chats: [[]] };
+    this.converterFactory = new ConverterFactory();
   }
 
   public resolveWebviewView(
@@ -40,6 +45,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     };
     webviewView.webview.html = this._getWebviewContent(webviewView.webview);
 
+    // Run background indexing when the webview is first loaded (if not already done)
+    if (!this._hasBackgroundIndexRun) {
+      this._hasBackgroundIndexRun = true;
+      // Run in the background without changing the UI status
+      this.runBackgroundIndexing();
+    }
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(async (data) => {
       switch (data.type) {
@@ -57,18 +68,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
             value: this._ragEnabled ? 'Enabled' : 'Off' 
           });
           
-          // If enabling RAG and we haven't indexed yet, start indexing
+          // If RAG is enabled, make sure we have an index with useDB=true
           if (this._ragEnabled && !this._ragService.isIndexed()) {
-            try {
-              this._view?.webview.postMessage({ type: 'updateStatus', value: 'Indexing workspace...' });
-              await this._ragService.indexWorkspace(msg => {
-                this._view?.webview.postMessage({ type: 'updateStatus', value: msg });
-              });
-              this._view?.webview.postMessage({ type: 'updateStatus', value: 'Ready' });
-            } catch (error) {
-              console.error('RAG indexing error:', error);
-              this._view?.webview.postMessage({ type: 'updateStatus', value: 'Error' });
-            }
+            // Check if we need to re-index with DB enabled
+            await this.indexWorkspace(true);
           }
           break;
         case 'stopGeneration':
@@ -87,6 +90,45 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  // Call the existing indexWorkspace method from RagService
+  private async indexWorkspace(ragEnabled: boolean): Promise<void> {
+    try {
+      this._view?.webview.postMessage({ type: 'updateStatus', value: 'Indexing workspace...' });
+      
+      // Call the existing method in RagService
+      await this._ragService.indexWorkspace(
+        ragEnabled,  // Pass the ragEnabled flag (same as useDB in your rag.ts)
+        msg => {
+          this._view?.webview.postMessage({ type: 'updateStatus', value: msg });
+        }
+      );
+      
+      this._view?.webview.postMessage({ type: 'updateStatus', value: 'Ready' });
+    } catch (error) {
+      console.error('RAG indexing error:', error);
+      this._view?.webview.postMessage({ type: 'updateStatus', value: 'Error' });
+    }
+  }
+  
+  // Run background indexing without UI updates
+  private async runBackgroundIndexing(): Promise<void> {
+    try {
+      console.log('Starting background indexing...');
+      
+      // Call the existing method in RagService with UI updates disabled
+      await this._ragService.indexWorkspace(
+        false, // Background indexing with RAG=false (useDB=false)
+        msg => {
+          console.log(msg); // Log to console but don't update UI
+        }
+      );
+      
+      console.log('Background indexing complete');
+    } catch (error) {
+      console.error('Background indexing error:', error);
+    }
+  }
+  
   public async handleUserMessage(message: string, context: vscode.WebviewViewResolveContext) {
     if (!this._view) return;
     
@@ -106,15 +148,42 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const selection = editor.selection;
     const selectedText = editor.document.getText(selection);
-    if (this._ragEnabled) {
-      let relevant_context = '';
-      relevant_context = await this._ragService.queryRelevantContent(message);
-      console.log(`Found: ${relevant_context}`);
+
+    let relevant_context = '';
+    if (selectedText){
+      // get related graph nodes
+      const metadata: SelectionMetadata = {
+        filePath: editor.document.uri.fsPath,
+        startLine: editor.selection.start.line,
+        endLine: editor.selection.end.line
+      };
+      relevant_context += editor.document.uri.fsPath;
+
+      // +1 to make it human-readable (1-based)
+      console.log(`Selected text from ${metadata.filePath}, lines ${metadata.startLine+1} to ${metadata.endLine+1}`);
+      if (this._ragEnabled){
+        relevant_context = await this._ragService.getContextForSelection(message, metadata);
+      } else {
+        for (const [startLine, endLine] of await this._ragService.getSelectedLines(metadata)){
+          console.log(`[${startLine}, ${endLine}]`);
+          const start = new vscode.Position(startLine, 0);
+          const end = new vscode.Position(endLine, editor.document.lineAt(endLine).text.length);
+          const range = new vscode.Range(start, end);
+          const text = editor.document.getText(range);
+          relevant_context += ` line ${startLine}-${endLine}\n${text} \n ... \n`;
+        }
+      }                                           
+      console.log(relevant_context);
+    } else {
+      console.log('KG Built');
+      // To do: return the codebase structure?...
     }
+    
     // Add user message to history
     const currentChat = this._chatHistory.chats[this._currentChatIndex];
     // currentChat.push({ role: 'user', content: selectedText ? message + "\n\nSelected text:\n" + selectedText : message});
-    currentChat.push({ role: 'user', content: message + selectedText});
+    const markdown = await this.convertToMarkdown(message);
+    currentChat.push({ role: 'user', content: markdown + relevant_context});
 
     // Update the UI with the new message
     this._view.webview.postMessage({ 
@@ -180,6 +249,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       });
     }
   }
+
+  /**
+   * Convert content to markdown
+   * @param input - URL or file path to convert
+   * @param options - Conversion options
+   * @returns Promise resolving to Markdown content
+   */
+  async convertToMarkdown(input: string, options: X2mdOptions = {}): Promise<string> {
+    try {
+      const result = await this.converterFactory.convert(input, options);
+      
+      // if (!result.success) {
+      //   vscode.window.showErrorMessage(`Conversion failed: ${result.error}`);
+      //   return `# Conversion Error\n\n${result.error}`;
+      // }
+      console.log(`parsed input: ${result.markdown}`);
+      return result.markdown;
+    } catch (error) {
+      const errorMsg = (error as Error).message;
+      vscode.window.showErrorMessage(`Error: ${errorMsg}`);
+      return `# Error\n\n${errorMsg}`;
+    }
+  }
+
   /**
    * Saves the current chat to a markdown file or appends to existing file
    */

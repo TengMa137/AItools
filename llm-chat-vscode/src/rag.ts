@@ -4,6 +4,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import fetch from 'node-fetch';
+import { KnowledgeGraph, KnowledgeGraphBuilder, GraphNode } from './Graph/knowledgeGraph'
+import { GraphVisualizer } from './Graph/graphVisualizer'
 
 /**
  * TextChunk interface for representing a chunk of text with metadata
@@ -35,6 +37,12 @@ export interface TextChunk {
   chunkCreatedAt: Date;            // When this chunk was created
 }
 
+export interface SelectionMetadata {
+  filePath: string;
+  startLine: number;
+  endLine: number;
+}
+
 export class RagService {
   private vectorStore: Map<string, {
     vector: number[],
@@ -45,6 +53,10 @@ export class RagService {
   private embeddingEndpoint: string;
   private apiKey: string;
   private cachePath: string;
+  private _graph: KnowledgeGraph = {
+    nodes: new Map<string, GraphNode>(),
+    edges: []
+  };
 
   constructor(apiKey: string, embeddingEndpoint: string = 'http://192.168.1.117:8081/v1/embeddings') {
     this.apiKey = apiKey;
@@ -111,7 +123,7 @@ export class RagService {
   /**
    * Index a workspace directory
    */
-  public async indexWorkspace(progressCallback?: (message: string) => void): Promise<void> {
+  public async indexWorkspace(useDB: boolean = false, progressCallback?: (message: string) => void): Promise<void> {
     if (!vscode.workspace.workspaceFolders?.length) {
       throw new Error("No workspace folder is open");
     }
@@ -125,25 +137,42 @@ export class RagService {
     let processed = 0;
     progressCallback?.(`Found ${filePaths.length} files to process`);
     console.log(`Found ${filePaths.length} files to process`);
-    
-    // Process files in batches to avoid rate limiting
-    for (const filePath of filePaths) {
-      try {
-        console.log(`Indexing ${filePath}`);
-        await this.indexFile(filePath);
-        processed++;
 
-        progressCallback?.(`Processed ${processed}/${filePaths.length} files`);
-        // Save progress occasionally
-        this.saveVectorCache();
-        
-      } catch (error) {
-        console.error(`Error indexing ${filePath}:`, error);
+    const knowledgeGraphBuilder = new KnowledgeGraphBuilder(workspacePath);
+
+    if(useDB){
+      // Process files in batches to avoid rate limiting
+      for (const filePath of filePaths) {
+        try {
+          console.log(`Indexing ${filePath}`);
+          await this.indexFile(filePath);
+          processed++;
+
+          progressCallback?.(`Processed ${processed}/${filePaths.length} files`);
+          // Save progress occasionally
+          this.saveVectorCache();
+          
+        } catch (error) {
+          console.error(`Error indexing ${filePath}:`, error);
+        }
       }
+      this.saveVectorCache();
+      progressCallback?.(`Indexing complete. Processed ${processed} files.`);
     }
     
-    this.saveVectorCache();
-    progressCallback?.(`Indexing complete. Processed ${processed} files.`);
+    // Build file knowledge graph
+    await knowledgeGraphBuilder.buildGraph(filePaths, useDB, progressCallback);
+    progressCallback?.("Generating file knowledge graph...");
+    // Generate visualizations
+    const visualizer = new GraphVisualizer(
+      knowledgeGraphBuilder.getGraph(), 
+      path.join(workspacePath, 'visualizations')
+    );
+    progressCallback?.("Generating visualizatoins of Graph");
+    await visualizer.generateD3Visualization();
+    await visualizer.exportGraphJson();
+
+    this._graph = knowledgeGraphBuilder.getGraph()
   }
   
   /**
@@ -256,7 +285,7 @@ export class RagService {
   /**
    * Get relevant content for a query
    */
-  public async queryRelevantContent(query: string, topK: number = 3): Promise<string> {
+  public async queryRelevantContent(query: string, references: string[] = [], topK: number = 3): Promise<string> {
     if (this.vectorStore.size === 0) {
       throw new Error("No content has been indexed yet.");
     }
@@ -273,6 +302,9 @@ export class RagService {
     }> = [];
     
     for (const [id, data] of this.vectorStore.entries()) {
+      if (!references.includes(data.filePath)) {
+        continue;
+      }
       const similarity = this.cosineSimilarity(queryVector, data.vector);
       similarities.push({
         id,
@@ -303,10 +335,262 @@ export class RagService {
   }
   
   /**
+   * Get relevant files for a specific selection
+   */
+  private async getRelevantFilesFromGraph(filePath: string): Promise<string[]> {
+    const relatedFiles = new Set<string>();
+    // Find the node ID for the given file path
+    let fileNodeId: string | null = null;
+    // First, identify the node ID for the given file
+    for (const [id, node] of this._graph.nodes.entries()) {
+      if (node.type === 'file' && node.location.filePath === filePath) {
+        fileNodeId = id;
+        break;
+      }
+    }
+    // If file node not found, return empty array
+    if (!fileNodeId) {
+      return [];
+    }
+    // Find all files that the given file imports
+    for (const edge of this._graph.edges) {    
+      if (edge.type === 'imports' && edge.source === fileNodeId) {
+        const targetNode = this._graph.nodes.get(edge.target);
+        if (targetNode && targetNode.type === 'file' && targetNode.location.filePath !== filePath) {
+          relatedFiles.add(targetNode.location.filePath);
+        }
+      }
+    }
+    
+    // Convert Set to Array and return
+    return Array.from(relatedFiles);
+  }
+
+  /**
+   * Get relevant nodes for a specific selection
+   */
+  private async getRelevantNodesFromGraph(metadata: SelectionMetadata): 
+    Promise<{primaryNodes: GraphNode[], referedNodes: GraphNode[]}> { // calledFromNodes: GraphNode[]
+    // Convert the Map to array for iteration
+    const nodes = Array.from(this._graph.nodes.values());
+    
+    // Find nodes that are in the same file
+    const candidateNodes = nodes.filter(node => 
+      node.location.filePath === metadata.filePath
+    );
+    
+    // No nodes in this file
+    if (candidateNodes.length === 0) {
+      console.log('File not included in Graph.')
+      return {
+        primaryNodes: [],
+        referedNodes: [],
+        // calledFromNodes: []
+      };
+    }
+    
+    // Find all nodes that completely contain the selection
+    const containingNodes = candidateNodes.filter(node => 
+      node.location.startLine <= metadata.startLine + 1 && 
+      node.location.endLine >= metadata.endLine
+    );
+    
+    let primaryNodes: GraphNode[] = [];
+    
+    if (containingNodes.length > 0) {
+      // Return all containing nodes, sorted from most specific to least specific
+      primaryNodes = containingNodes.sort((a, b) => {
+        const scopeA = a.location.endLine - a.location.startLine;
+        const scopeB = b.location.endLine - b.location.startLine;
+        return scopeA - scopeB; // Sort by ascending scope size (most specific first)
+      });
+    } 
+    
+    // Find nodes that are referenced by the primary nodes
+    const referedNodes: GraphNode[] = [];
+    
+    // Find nodes that call the primary nodes
+    // const calledFromNodes: GraphNode[] = [];
+    
+    // Get primary node IDs
+    //const primaryNodeIds = primaryNodes.map(node => node.id);
+    const primaryNodeIds = new Set(primaryNodes.map(node => node.id));
+    // Find all nodes that have a relationship with the primary nodes
+    if (primaryNodes.length > 0) {
+      // Get all edges connected to the primary nodes
+      const relatedEdges = this._graph.edges.filter(edge => 
+        primaryNodeIds.has(edge.source) //|| primaryNodeIds.has(edge.target)
+      );
+      
+      // Get all node IDs from related edges
+      const relatedNodeIds = new Set<string>();
+      relatedEdges.forEach(edge => {
+        if (!primaryNodeIds.has(edge.source)) relatedNodeIds.add(edge.source);
+        //if (!primaryNodeIds.has(edge.target)) calledFromNodes.add(edge.target);
+      });
+      
+      // Get the actual node objects
+      relatedNodeIds.forEach(id => {
+        const node = this._graph.nodes.get(id);
+        if (node) referedNodes.push(node);
+      });
+    } 
+    
+    return {
+      primaryNodes,
+      referedNodes,
+      //calledFromNodes
+    };
+  }
+
+  /**
+   * Extract context from nodes and return a string to feed LLM.
+   */
+  private async extractContextFromNodes(primaryNodes: GraphNode[], referedNodes: GraphNode[]): Promise<Array<[number, number]>>{
+  // ): Promise<{
+  //   currentFileRanges: Array<[number, number]>;  // Line ranges in current file
+  //   externalFileRanges: Record<string, Array<[number, number]>>;  // Line ranges in other files
+  //   callerFileRanges: Record<string, Array<[number, number]>>;  // Line ranges of callers
+  // }> {
+    if (primaryNodes.length === 0) {
+      return [];
+      // {
+      //   currentFileRanges: [],
+      //   externalFileRanges: {},
+      //   callerFileRanges: {}
+      // };
+    }
+    if (primaryNodes[0].type === 'file') {
+      return [[primaryNodes[0].location.startLine, primaryNodes[0].location.endLine]]
+    }
+    
+    // Get the main file path from primary nodes
+    const mainFilePath = primaryNodes[0].location.filePath;
+    // const mainSelectedNode = primaryNodes[0].id;//: Array<[number, number]> = [[primaryNodes[0].location.startLine, primaryNodes[0].location.endLine]];
+    console.log(`prime node id ${primaryNodes[0].id}, start: ${primaryNodes[0].location.startLine}, end: ${primaryNodes[0].location.endLine}.`)
+
+    // Part 1: Current file ranges
+    // Group nodes by file
+    const currentFileNodes = [...primaryNodes, ...referedNodes].filter(
+      node => node.location.filePath === mainFilePath
+    );
+    // // Return all containing nodes, sorted from most specific to least specific
+    // primaryNodes = containingNodes.sort((a, b) => {
+    //   const scopeA = a.location.endLine - a.location.startLine;
+    //   const scopeB = b.location.endLine - b.location.startLine;
+    //   return scopeA - scopeB; // Sort by ascending scope size (most specific first)
+    // });
+    
+    // Sort by startLine to preserve file order
+    // currentFileNodes.sort((a, b) => a.location.startLine - b.location.startLine);
+    
+    // Extract line ranges, merging overlapping ranges
+    const currentFileRanges: Array<[number, number]> = [];
+    currentFileNodes.forEach(node => {
+      if (node.id === primaryNodes[0].id) {
+        currentFileRanges.push([node.location.startLine - 1, node.location.endLine - 1])
+        console.log(`start: ${node.location.startLine}, end: ${node.location.endLine}.`)
+      } else {
+        if (node.type === 'file') {
+          return [];
+        }
+        currentFileRanges.push([node.location.startLine, node.location.startLine])
+        console.log(`start: ${node.location.startLine}, end: ${node.location.startLine}.`)
+      }
+      
+      // // Try to merge with existing ranges if they overlap
+      // let merged = false;
+      // for (let i = 0; i < currentFileRanges.length; i++) {
+      //   const range = currentFileRanges[i];
+        
+      //   // Check if ranges overlap or are adjacent
+      //   if (newRange[0] <= range[1] + 1 && range[0] <= newRange[1] + 1) {
+      //     // Merge ranges
+      //     range[0] = Math.min(range[0], newRange[0]);
+      //     range[1] = Math.max(range[1], newRange[1]);
+      //     merged = true;
+      //     break;
+      //   }
+      // }
+      
+      // // Add as new range if not merged
+      // if (!merged) {
+      //   currentFileRanges.push([...newRange]);
+      // }
+    });
+    
+    // // Part 2: Referenced nodes in other files
+    // const externalFileRanges: Record<string, Array<[number, number]>> = {};
+    
+    // const externalReferedNodes = referedNodes.filter(
+    //   node => node.location.filePath !== mainFilePath
+    // );
+    
+    // externalReferedNodes.forEach(node => {
+    //   const filePath = node.location.filePath;
+    //   if (!externalFileRanges[filePath]) {
+    //     externalFileRanges[filePath] = [];
+    //   }
+      
+    //   const newRange: [number, number] = [node.location.startLine, node.location.endLine];
+      
+    //   // Try to merge with existing ranges
+    //   let merged = false;
+    //   for (let i = 0; i < externalFileRanges[filePath].length; i++) {
+    //     const range = externalFileRanges[filePath][i];
+        
+    //     // Check if ranges overlap or are adjacent
+    //     if (newRange[0] <= range[1] + 1 && range[0] <= newRange[1] + 1) {
+    //       // Merge ranges
+    //       range[0] = Math.min(range[0], newRange[0]);
+    //       range[1] = Math.max(range[1], newRange[1]);
+    //       merged = true;
+    //       break;
+    //     }
+    //   }
+      
+    //   // Add as new range if not merged
+    //   if (!merged) {
+    //     externalFileRanges[filePath].push([...newRange]);
+    //   }
+    // });
+    // Sort all ranges by start line
+    currentFileRanges.sort((a, b) => a[0] - b[0]);
+    
+    // Object.keys(externalFileRanges).forEach(filePath => {
+    //   externalFileRanges[filePath].sort((a, b) => a[0] - b[0]);
+    // });
+    
+    // Object.keys(callerFileRanges).forEach(filePath => {
+    //   callerFileRanges[filePath].sort((a, b) => a[0] - b[0]);
+    // });
+    
+    return currentFileRanges;
+    // {
+    //   currentFileRanges
+    //   externalFileRanges,
+    //   callerFileRanges
+    // };
+  }
+
+  /**
    * Get relevant context for a specific selection
    */
-  public async getContextForSelection(filePath: string, selectedText: string): Promise<string> {
-    return this.queryRelevantContent(selectedText);
+  public async getContextForSelection(selectedText: string, metadata: SelectionMetadata): Promise<string> {
+    if (this._graph.nodes.size != 0) {
+      const references = await this.getRelevantFilesFromGraph(metadata.filePath);
+      return this.queryRelevantContent(selectedText, references);
+    }
+    return selectedText;
+  }
+
+  /**
+   * Get simplified file with selected lines
+   */
+  public async getSelectedLines(metadata: SelectionMetadata): Promise<Array<[number, number]>> {
+    // Get the relevant nodes both in the same file as selectedText and other files in the workspace. 
+    const { primaryNodes, referedNodes } = await this.getRelevantNodesFromGraph(metadata);
+    return this.extractContextFromNodes(primaryNodes, referedNodes);
   }
 
 
@@ -350,14 +634,6 @@ export class RagService {
 
     const chunks: TextChunk[] = [];
     let chunkIndex = 0;
-
-    // Extract the first line from a segment to use in hierarchy info
-    const extractHierarchyLabel = (segment: string, separator: string): string => {
-      // Get the first line or a reasonable portion of it
-      const firstLine = segment.split(separator)[0].trim();
-      // Limit length to avoid extremely long hierarchy info
-      return firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
-    };
 
     // Recursively split text using the separators hierarchy
     const splitByHierarchy = (
